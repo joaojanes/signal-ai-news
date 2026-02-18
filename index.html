@@ -39,7 +39,7 @@
     .hero h1 em { color: var(--purple); font-style: normal; }
     .hero p { font-size: 16px; color: var(--muted); line-height: 1.7; margin-bottom: 40px; }
     .hero-stats { display: flex; justify-content: center; gap: 56px; }
-    .stat-num { font-family: 'Sora', sans-serif; font-size: 30px; font-weight: 800; color: var(--text); }
+    .stat-num { font-family: 'Sora', sans-serif; font-size: 30px; font-weight: 800; }
     .stat-num em { color: var(--purple); font-style: normal; }
     .stat-label { font-size: 11px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; margin-top: 4px; }
 
@@ -80,10 +80,6 @@
 
     .shimmer { background: linear-gradient(90deg, var(--border) 25%, #ededf8 50%, var(--border) 75%); background-size: 200% 100%; animation: sh 1.4s infinite; border-radius: 6px; height: 12px; margin-bottom: 10px; }
     @keyframes sh { 0%{background-position:200%} 100%{background-position:-200%} }
-
-    /* Status banner */
-    .status-banner { background: #fff8e1; border: 1px solid #ffe082; border-radius: 12px; padding: 12px 20px; margin-bottom: 20px; font-size: 12px; color: #7c6200; display: none; }
-    .status-banner.show { display: block; }
 
     footer { background: var(--white); border-top: 1px solid var(--border); text-align: center; padding: 24px; font-size: 11px; color: var(--muted); letter-spacing: 0.04em; }
 
@@ -142,7 +138,6 @@
 
 <div class="wrap">
   <div class="section-eyebrow">Top Story</div>
-  <div class="status-banner" id="statusBanner"></div>
   <div class="featured-card">
     <div>
       <div class="featured-tag" id="ftag">Loading…</div>
@@ -236,12 +231,22 @@
 <script>
 document.getElementById('dateDisplay').textContent = new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
 
-// Multiple CORS proxies — we try each one until one works
-const PROXIES = [
-  url => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
-  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
-];
+// Uses our own Vercel serverless function — no CORS issues!
+async function fetchFeed(f) {
+  try {
+    const res = await fetch(`/api/feed?url=${encodeURIComponent(f.url)}`);
+    if (!res.ok) return [];
+    const text = await res.text();
+    const xml = new DOMParser().parseFromString(text, 'text/xml');
+    return [...xml.querySelectorAll('item, entry')].slice(0, 6).map(n => ({
+      title: n.querySelector('title')?.textContent?.trim() || 'Untitled',
+      link:  n.querySelector('link')?.textContent?.trim() || n.querySelector('link')?.getAttribute('href') || '#',
+      desc:  (n.querySelector('description,summary')?.textContent || '').replace(/<[^>]+>/g,'').trim().slice(0,150) + '…',
+      date:  n.querySelector('pubDate,published,updated')?.textContent?.trim() || '',
+      label: f.label, source: f.name, player: f.player || null,
+    }));
+  } catch { return []; }
+}
 
 const FEEDS = {
   research:[
@@ -278,42 +283,6 @@ const FEEDS = {
 };
 
 let all = {};
-let workingProxyIndex = 0;
-
-// Try each proxy until one returns valid XML
-async function fetchWithFallback(feedUrl) {
-  for (let i = 0; i < PROXIES.length; i++) {
-    const proxyIdx = (workingProxyIndex + i) % PROXIES.length;
-    try {
-      const proxyUrl = PROXIES[proxyIdx](feedUrl);
-      const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
-      if (!res.ok) continue;
-      const data = await res.json().catch(() => null);
-      // allorigins wraps in {contents:...}, codetabs returns raw text
-      const text = data?.contents ?? await res.text?.() ?? null;
-      if (!text || text.length < 100) continue;
-      const xml = new DOMParser().parseFromString(text, 'text/xml');
-      const items = [...xml.querySelectorAll('item, entry')];
-      if (items.length === 0) continue;
-      workingProxyIndex = proxyIdx; // remember which proxy worked
-      return items;
-    } catch { continue; }
-  }
-  return [];
-}
-
-async function fetchFeed(f) {
-  try {
-    const items = await fetchWithFallback(f.url);
-    return items.slice(0, 6).map(n => ({
-      title: n.querySelector('title')?.textContent?.trim() || 'Untitled',
-      link: n.querySelector('link')?.textContent?.trim() || n.querySelector('link')?.getAttribute('href') || '#',
-      desc: (n.querySelector('description,summary')?.textContent || '').replace(/<[^>]+>/g,'').trim().slice(0,150) + '…',
-      date: n.querySelector('pubDate,published,updated')?.textContent?.trim() || '',
-      label: f.label, source: f.name, player: f.player || null,
-    }));
-  } catch { return []; }
-}
 
 function fmt(s) {
   if (!s) return '—';
@@ -331,11 +300,8 @@ function card(a) {
 }
 
 function render(articles, gid, cid, max=6) {
-  const g = document.getElementById(gid);
-  const s = articles.slice(0, max);
-  g.innerHTML = s.length
-    ? s.map(card).join('')
-    : `<div class="card" style="grid-column:1/-1;color:var(--muted);font-size:13px;padding:32px 24px;">No articles loaded for this category.</div>`;
+  document.getElementById(gid).innerHTML = articles.slice(0,max).map(card).join('') ||
+    `<div class="card" style="grid-column:1/-1;color:var(--muted);font-size:13px;padding:32px;">No articles loaded.</div>`;
   if (cid) document.getElementById(cid).textContent = articles.length + ' articles';
 }
 
@@ -348,38 +314,25 @@ function filterPlayer(p, el) {
 }
 
 async function loadAll() {
-  // Load all categories in parallel, each feed independently
-  const results = await Promise.allSettled(
-    Object.keys(FEEDS).map(async cat => {
-      const feeds = await Promise.allSettled(FEEDS[cat].map(fetchFeed));
-      all[cat] = feeds.flatMap(r => r.status === 'fulfilled' ? r.value : []).filter(a => a.title !== 'Untitled');
-      return cat;
-    })
-  );
+  await Promise.all(Object.keys(FEEDS).map(async cat => {
+    const results = await Promise.allSettled(FEEDS[cat].map(fetchFeed));
+    all[cat] = results.flatMap(r => r.status === 'fulfilled' ? r.value : []).filter(a => a.title !== 'Untitled');
+  }));
 
-  // Render all sections
-  render(all.research  || [], 'researchGrid', 'researchCount');
-  render(all.tools     || [], 'toolsGrid',    'toolsCount');
-  render(all.players   || [], 'playersGrid',  'playersCount');
-  render(all.policy    || [], 'policyGrid',   'policyCount');
-  render(all.pharma    || [], 'pharmaGrid',   'pharmaCount');
-  render(all.business  || [], 'businessGrid', 'businessCount');
+  render(all.research || [], 'researchGrid', 'researchCount');
+  render(all.tools    || [], 'toolsGrid',    'toolsCount');
+  render(all.players  || [], 'playersGrid',  'playersCount');
+  render(all.policy   || [], 'policyGrid',   'policyCount');
+  render(all.pharma   || [], 'pharmaGrid',   'pharmaCount');
+  render(all.business || [], 'businessGrid', 'businessCount');
 
-  // Featured story
-  const heroPool = [...(all.players||[]), ...(all.tools||[]), ...(all.research||[])];
-  const hero = heroPool[0];
+  const hero = [...(all.players||[]), ...(all.tools||[]), ...(all.research||[])][0];
   if (hero) {
     document.getElementById('ftag').textContent   = hero.label;
     document.getElementById('ftitle').textContent = hero.title;
     document.getElementById('fdesc').textContent  = hero.desc;
     document.getElementById('flink').href         = hero.link;
     document.getElementById('fmeta').textContent  = fmt(hero.date) + ' · ' + hero.source;
-  } else {
-    document.getElementById('ftitle').textContent = 'Could not load stories.';
-    document.getElementById('fdesc').textContent  = 'RSS feeds may be temporarily unavailable. Try refreshing in a moment.';
-    const banner = document.getElementById('statusBanner');
-    banner.textContent = '⚠️ Some feeds failed to load. This can happen due to CORS restrictions on certain browsers. Try refreshing — feeds usually work on the second attempt.';
-    banner.classList.add('show');
   }
 
   const total = Object.values(all).flat().length;
