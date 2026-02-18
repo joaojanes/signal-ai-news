@@ -68,7 +68,7 @@
     .pill.active { background: var(--purple); color: white; border-color: var(--purple); }
 
     .cards-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-    .card { background: var(--white); border: 1px solid var(--border); border-radius: 16px; padding: 24px; text-decoration: none; color: inherit; display: flex; flex-direction: column; transition: all 0.25s; }
+    .card { background: var(--white); border: 1px solid var(--border); border-radius: 16px; padding: 24px; text-decoration: none; color: inherit; display: flex; flex-direction: column; transition: all 0.25s; position: relative; }
     .card:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(108,92,231,0.1); border-color: var(--purple-light); }
     .card-source { font-size: 10px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--purple); margin-bottom: 10px; }
     .card h4 { font-size: 14px; font-weight: 600; line-height: 1.45; margin-bottom: 10px; flex: 1; }
@@ -77,6 +77,8 @@
     .card-date { font-size: 10px; color: var(--muted); font-weight: 500; }
     .card-arrow { width: 24px; height: 24px; border-radius: 50%; background: var(--purple-glow); display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--purple); opacity: 0; transition: opacity 0.2s; }
     .card:hover .card-arrow { opacity: 1; }
+    /* Top-scored badge */
+    .card.top-pick::after { content: '★'; position: absolute; top: 16px; right: 16px; font-size: 10px; color: var(--purple-light); }
 
     .shimmer { background: linear-gradient(90deg, var(--border) 25%, #ededf8 50%, var(--border) 75%); background-size: 200% 100%; animation: sh 1.4s infinite; border-radius: 6px; height: 12px; margin-bottom: 10px; }
     @keyframes sh { 0%{background-position:200%} 100%{background-position:-200%} }
@@ -225,36 +227,71 @@
 </div>
 
 <footer>
-  SIGNAL — AI News &nbsp;·&nbsp; 30+ sources including arXiv, WSJ, The Economist, The Atlantic, Nature, STAT News & more &nbsp;·&nbsp; Updated daily
+  SIGNAL — AI News &nbsp;·&nbsp; 30+ sources · Ranked by relevance & source prestige &nbsp;·&nbsp; Updated daily
 </footer>
 
 <script>
 document.getElementById('dateDisplay').textContent = new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
 
 // ── DATE-SEEDED RNG ──────────────────────────────────────────────────────────
-// Same seed = same order all day. Different seed tomorrow = different order.
 function getDaySeed() {
   const d = new Date();
   return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
 }
-
 function seededRng(seed) {
   let s = seed;
-  return function() {
-    s = (s * 1664525 + 1013904223) & 0xffffffff;
-    return (s >>> 0) / 0xffffffff;
-  };
+  return () => { s = (s * 1664525 + 1013904223) & 0xffffffff; return (s >>> 0) / 0xffffffff; };
 }
-
 const rng = seededRng(getDaySeed());
-
 function seededShuffle(arr) {
   const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
   return a;
+}
+
+// ── SOURCE PRESTIGE SCORES ───────────────────────────────────────────────────
+const PRESTIGE = {
+  // Tier 1 — top academic & journalism (10)
+  'Nature': 10, 'Science': 10, 'The Economist': 10, 'MIT Tech Review': 10,
+  'WSJ': 10, 'Financial Times': 10, 'The Atlantic': 10,
+  // Tier 2 — strong specialist (8)
+  'Anthropic': 8, 'OpenAI': 8, 'Google': 8, 'arXiv': 8,
+  'Bloomberg': 8, 'STAT News': 8, 'IEEE Spectrum': 8, 'Distill': 8,
+  // Tier 3 — good tech press (6)
+  'Microsoft': 6, 'Meta': 6, 'NVIDIA': 6, 'Wired': 6,
+  'Ars Technica': 6, 'New Scientist': 6, 'Semantic Scholar': 6,
+  'BioPharma Dive': 6, 'Nature Biotech': 6,
+  // Tier 4 — solid but broad (4)
+  'TechCrunch': 4, 'The Verge': 4, 'VentureBeat': 4, 'Fortune': 4,
+  'Fierce Biotech': 4, 'Drug Discovery Today': 4, 'Brookings': 4,
+  // Tier 5 — trade / corporate (2)
+  'ZDNet': 2, 'InfoWorld': 2, 'Business Insider': 2,
+  'Pfizer': 2, 'Novartis': 2, 'Roche': 2, 'AstraZeneca': 2, 'Mistral': 2,
+};
+
+// ── KEYWORD RELEVANCE SCORES ─────────────────────────────────────────────────
+// Each keyword match adds to the score. More specific = more points.
+const KEYWORDS = [
+  // High value — specific AI topics (3pts each)
+  { re: /\b(large language model|LLM|foundation model|transformer|GPT|claude|gemini|llama|mistral|grok)\b/i, pts: 3 },
+  { re: /\b(reinforcement learning|RLHF|fine.?tuning|pre.?training|alignment)\b/i, pts: 3 },
+  { re: /\b(drug discovery|protein folding|alphafold|clinical trial|genomics|biomarker)\b/i, pts: 3 },
+  { re: /\b(regulation|legislation|executive order|AI act|policy|governance|safety)\b/i, pts: 3 },
+  // Medium value — general AI (2pts each)
+  { re: /\b(artificial intelligence|machine learning|deep learning|neural network|AI model)\b/i, pts: 2 },
+  { re: /\b(benchmark|state.of.the.art|outperforms|surpasses|breakthrough)\b/i, pts: 2 },
+  { re: /\b(open.?source|open.?weight|release|launch|announce|deploy)\b/i, pts: 2 },
+  { re: /\b(reasoning|multimodal|vision|robotics|autonomous|agent)\b/i, pts: 2 },
+  // Lower value — broad tech (1pt each)
+  { re: /\b(AI|ML|data|compute|chip|GPU|semiconductor|startup|funding|billion)\b/i, pts: 1 },
+  { re: /\b(research|paper|study|scientists|researchers|lab|institute)\b/i, pts: 1 },
+];
+
+function scoreArticle(article) {
+  const prestigeScore = PRESTIGE[article.source] || 1;
+  const text = (article.title + ' ' + article.desc).toLowerCase();
+  const keywordScore = KEYWORDS.reduce((sum, k) => sum + (k.re.test(text) ? k.pts : 0), 0);
+  return prestigeScore + keywordScore;
 }
 
 // ── TITLE CLEANER ────────────────────────────────────────────────────────────
@@ -267,12 +304,43 @@ function cleanTitle(title) {
   t = t.replace(/\(\d{4}\.\d+\)/g, '');
   t = t.replace(/\s+by\s+[A-Z][a-z]+,?\s+[A-Z][\.,].*?(et al\.?)?/g, '');
   t = t.replace(/\s*[\|\-–]\s*(Nature|Science|Cell|PNAS|NEJM|Lancet|JAMA|NeurIPS|ICML|ICLR|CVPR)[\s\d]*/gi, '');
-  t = t.replace(/\s*\((Nature|Science|Cell|PNAS|NEJM|Lancet)\s*\d*\)/gi, '');
   t = t.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ');
   t = t.replace(/\s+/g, ' ').trim();
   if (t.length > 0) t = t.charAt(0).toUpperCase() + t.slice(1);
   if (t.length < 15) t = title.replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
   return t;
+}
+
+// ── SELECT BEST ARTICLES ─────────────────────────────────────────────────────
+// Score all, sort descending, then ensure source diversity (max 2 per source)
+function selectBest(articles, max = 9) {
+  // Score every article
+  const scored = articles.map(a => ({ ...a, _score: scoreArticle(a) }));
+
+  // Sort by score descending
+  scored.sort((a, b) => b._score - a._score);
+
+  // Pick top articles, but cap at 2 per source to keep diversity
+  const sourceCounts = {};
+  const selected = [];
+  for (const a of scored) {
+    if (selected.length >= max) break;
+    sourceCounts[a.source] = (sourceCounts[a.source] || 0);
+    if (sourceCounts[a.source] < 2) {
+      selected.push(a);
+      sourceCounts[a.source]++;
+    }
+  }
+
+  // If we couldn't fill 9 with diversity cap, fill remaining from leftovers
+  if (selected.length < max) {
+    for (const a of scored) {
+      if (selected.length >= max) break;
+      if (!selected.includes(a)) selected.push(a);
+    }
+  }
+
+  return selected;
 }
 
 // ── FEEDS ────────────────────────────────────────────────────────────────────
@@ -340,7 +408,7 @@ async function fetchFeed(f) {
     if (!res.ok) return [];
     const text = await res.text();
     const xml = new DOMParser().parseFromString(text, 'text/xml');
-    return [...xml.querySelectorAll('item, entry')].slice(0, 8).map(n => ({
+    return [...xml.querySelectorAll('item, entry')].slice(0, 10).map(n => ({
       title: cleanTitle(n.querySelector('title')?.textContent?.trim() || 'Untitled'),
       link:  n.querySelector('link')?.textContent?.trim() || n.querySelector('link')?.getAttribute('href') || '#',
       desc:  (n.querySelector('description,summary')?.textContent || '').replace(/<[^>]+>/g,'').trim().slice(0,150) + '…',
@@ -357,7 +425,8 @@ function fmt(s) {
 }
 
 function card(a) {
-  return `<a class="card" href="${a.link}" target="_blank" rel="noopener">
+  const isTopPick = a._score >= 12;
+  return `<a class="card${isTopPick ? ' top-pick' : ''}" href="${a.link}" target="_blank" rel="noopener">
     <div class="card-source">${a.label}</div>
     <h4>${a.title}</h4>
     <p>${a.desc}</p>
@@ -365,32 +434,12 @@ function card(a) {
   </a>`;
 }
 
-// Interleave articles by source so no single source clusters,
-// using the day-seeded shuffle so order is identical for all visitors today
-function interleave(articles) {
-  const bySource = {};
-  articles.forEach(a => {
-    if (!bySource[a.source]) bySource[a.source] = [];
-    bySource[a.source].push(a);
-  });
-  const sources = seededShuffle(Object.keys(bySource));
-  const result = [];
-  let added = true;
-  while (added) {
-    added = false;
-    sources.forEach(s => {
-      if (bySource[s].length) { result.push(bySource[s].shift()); added = true; }
-    });
-  }
-  return result;
-}
-
-function render(articles, gid, cid, max=9) {
-  const mixed = interleave(articles).slice(0, max);
-  document.getElementById(gid).innerHTML = mixed.length
-    ? mixed.map(card).join('')
+function render(articles, gid, cid) {
+  const best = selectBest(articles, 9);
+  document.getElementById(gid).innerHTML = best.length
+    ? best.map(card).join('')
     : `<div class="card" style="grid-column:1/-1;color:var(--muted);font-size:13px;padding:32px;">No articles loaded.</div>`;
-  if (cid) document.getElementById(cid).textContent = articles.length + ' articles';
+  if (cid) document.getElementById(cid).textContent = articles.length + ' fetched · showing top 9';
 }
 
 function goto(id) { document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'}); }
@@ -414,7 +463,12 @@ async function loadAll() {
   render(all.pharma   || [], 'pharmaGrid',   'pharmaCount');
   render(all.business || [], 'businessGrid', 'businessCount');
 
-  const hero = interleave([...(all.players||[]), ...(all.tools||[]), ...(all.research||[])])[0];
+  // Hero = highest scored article across players + tools + research
+  const heroPool = [...(all.players||[]), ...(all.tools||[]), ...(all.research||[])]
+    .map(a => ({...a, _score: scoreArticle(a)}))
+    .sort((a,b) => b._score - a._score);
+
+  const hero = heroPool[0];
   if (hero) {
     document.getElementById('ftag').textContent   = hero.label;
     document.getElementById('ftitle').textContent = hero.title;
