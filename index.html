@@ -129,7 +129,7 @@
         <div class="stat-label">Categories</div>
       </div>
       <div>
-        <div class="stat-num"><em>15+</em></div>
+        <div class="stat-num"><em>30+</em></div>
         <div class="stat-label">Sources</div>
       </div>
     </div>
@@ -209,7 +209,7 @@
 
 <div class="section" id="pharma">
   <div class="section-header">
-    <div class="section-title">AI in Pharma</div>
+    <div class="section-title">AI in Pharma & Bio</div>
     <div class="section-count" id="pharmaCount">Loading…</div>
   </div>
   <div class="cards-grid" id="pharmaGrid"></div>
@@ -225,21 +225,123 @@
 </div>
 
 <footer>
-  SIGNAL — AI News &nbsp;·&nbsp; Sources: arXiv, TechCrunch, The Verge, Nature, MIT Tech Review, VentureBeat, STAT News & more &nbsp;·&nbsp; Updated daily
+  SIGNAL — AI News &nbsp;·&nbsp; 30+ sources including arXiv, WSJ, The Economist, The Atlantic, Nature, STAT News & more &nbsp;·&nbsp; Updated daily
 </footer>
 
 <script>
 document.getElementById('dateDisplay').textContent = new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
 
-// Uses our own Vercel serverless function — no CORS issues!
+// ── DATE-SEEDED RNG ──────────────────────────────────────────────────────────
+// Same seed = same order all day. Different seed tomorrow = different order.
+function getDaySeed() {
+  const d = new Date();
+  return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+}
+
+function seededRng(seed) {
+  let s = seed;
+  return function() {
+    s = (s * 1664525 + 1013904223) & 0xffffffff;
+    return (s >>> 0) / 0xffffffff;
+  };
+}
+
+const rng = seededRng(getDaySeed());
+
+function seededShuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// ── TITLE CLEANER ────────────────────────────────────────────────────────────
+function cleanTitle(title) {
+  let t = title;
+  t = t.replace(/\[PDF\]/gi, '');
+  t = t.replace(/\[Preprint\]/gi, '');
+  t = t.replace(/\[v\d+\]/gi, '');
+  t = t.replace(/arXiv:\d+\.\d+v?\d*/gi, '');
+  t = t.replace(/\(\d{4}\.\d+\)/g, '');
+  t = t.replace(/\s+by\s+[A-Z][a-z]+,?\s+[A-Z][\.,].*?(et al\.?)?/g, '');
+  t = t.replace(/\s*[\|\-–]\s*(Nature|Science|Cell|PNAS|NEJM|Lancet|JAMA|NeurIPS|ICML|ICLR|CVPR)[\s\d]*/gi, '');
+  t = t.replace(/\s*\((Nature|Science|Cell|PNAS|NEJM|Lancet)\s*\d*\)/gi, '');
+  t = t.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ');
+  t = t.replace(/\s+/g, ' ').trim();
+  if (t.length > 0) t = t.charAt(0).toUpperCase() + t.slice(1);
+  if (t.length < 15) t = title.replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+  return t;
+}
+
+// ── FEEDS ────────────────────────────────────────────────────────────────────
+const FEEDS = {
+  research: [
+    {url:'https://arxiv.org/rss/cs.AI',  label:'arXiv · AI',      name:'arXiv'},
+    {url:'https://arxiv.org/rss/cs.LG',  label:'arXiv · ML',      name:'arXiv'},
+    {url:'https://arxiv.org/rss/cs.CL',  label:'arXiv · NLP',     name:'arXiv'},
+    {url:'https://arxiv.org/rss/cs.CV',  label:'arXiv · Vision',  name:'arXiv'},
+    {url:'https://arxiv.org/rss/cs.RO',  label:'arXiv · Robotics',name:'arXiv'},
+    {url:'https://distill.pub/rss.xml',  label:'Distill',         name:'Distill'},
+  ],
+  tools: [
+    {url:'https://techcrunch.com/category/artificial-intelligence/feed/', label:'TechCrunch',  name:'TechCrunch'},
+    {url:'https://www.theverge.com/rss/ai-artificial-intelligence/index.xml', label:'The Verge', name:'The Verge'},
+    {url:'https://venturebeat.com/category/ai/feed/',  label:'VentureBeat', name:'VentureBeat'},
+    {url:'https://feeds.arstechnica.com/arstechnica/technology-lab', label:'Ars Technica', name:'Ars Technica'},
+    {url:'https://www.zdnet.com/topic/artificial-intelligence/rss.xml', label:'ZDNet', name:'ZDNet'},
+    {url:'https://www.infoworld.com/category/artificial-intelligence/index.rss', label:'InfoWorld', name:'InfoWorld'},
+  ],
+  policy: [
+    {url:'https://www.technologyreview.com/feed/',     label:'MIT Tech Review', name:'MIT Tech Review'},
+    {url:'https://www.brookings.edu/topic/artificial-intelligence/feed/', label:'Brookings', name:'Brookings'},
+    {url:'https://theatlantic.com/feed/all/',          label:'The Atlantic',    name:'The Atlantic'},
+    {url:'https://www.economist.com/science-and-technology/rss.xml', label:'The Economist', name:'The Economist'},
+    {url:'https://www.newscientist.com/subject/technology/feed/', label:'New Scientist', name:'New Scientist'},
+    {url:'https://spectrum.ieee.org/feeds/topic/artificial-intelligence.rss', label:'IEEE Spectrum', name:'IEEE Spectrum'},
+  ],
+  business: [
+    {url:'https://feeds.a.dj.com/rss/RSSWSJD.xml',    label:'WSJ Tech',        name:'WSJ'},
+    {url:'https://www.wired.com/feed/tag/ai/latest/rss', label:'Wired',         name:'Wired'},
+    {url:'https://fortune.com/feed/',                  label:'Fortune',         name:'Fortune'},
+    {url:'https://feeds.bloomberg.com/technology/news.rss', label:'Bloomberg Tech', name:'Bloomberg'},
+    {url:'https://www.ft.com/technology?format=rss',   label:'FT Tech',         name:'Financial Times'},
+    {url:'https://www.businessinsider.com/rss',        label:'Business Insider',name:'Business Insider'},
+  ],
+  pharma: [
+    {url:'https://www.nature.com/natmachintell.rss',   label:'Nature MI',       name:'Nature'},
+    {url:'https://www.nature.com/nbt/rss/current',     label:'Nature Biotech',  name:'Nature'},
+    {url:'https://www.statnews.com/feed/',             label:'STAT News',       name:'STAT News'},
+    {url:'https://www.fiercebiotech.com/rss/xml',      label:'Fierce Biotech',  name:'Fierce Biotech'},
+    {url:'https://www.biopharmadive.com/feeds/news/',  label:'BioPharma Dive',  name:'BioPharma Dive'},
+    {url:'https://www.drugdiscoverytoday.com/rss/news',label:'Drug Discovery Today', name:'Drug Discovery Today'},
+    {url:'https://www.pfizer.com/news/press-release/rss', label:'Pfizer',       name:'Pfizer'},
+    {url:'https://www.novartis.com/rss/news.xml',      label:'Novartis',        name:'Novartis'},
+    {url:'https://www.roche.com/rss/media.xml',        label:'Roche',           name:'Roche'},
+    {url:'https://www.astrazeneca.com/media-centre/press-releases.rss', label:'AstraZeneca', name:'AstraZeneca'},
+  ],
+  players: [
+    {url:'https://www.anthropic.com/rss.xml',          label:'Anthropic',  name:'Anthropic',  player:'anthropic'},
+    {url:'https://openai.com/news/rss.xml',            label:'OpenAI',     name:'OpenAI',     player:'openai'},
+    {url:'https://blog.google/technology/ai/rss/',     label:'Google AI',  name:'Google',     player:'google'},
+    {url:'https://blogs.microsoft.com/ai/feed/',       label:'Microsoft AI',name:'Microsoft', player:'microsoft'},
+    {url:'https://ai.meta.com/blog/rss/',              label:'Meta AI',    name:'Meta',       player:'meta'},
+    {url:'https://blogs.nvidia.com/feed/',             label:'NVIDIA',     name:'NVIDIA',     player:'nvidia'},
+    {url:'https://mistral.ai/feed.xml',                label:'Mistral',    name:'Mistral',    player:'other'},
+  ],
+};
+
+let all = {};
+
 async function fetchFeed(f) {
   try {
     const res = await fetch(`/api/feed?url=${encodeURIComponent(f.url)}`);
     if (!res.ok) return [];
     const text = await res.text();
     const xml = new DOMParser().parseFromString(text, 'text/xml');
-    return [...xml.querySelectorAll('item, entry')].slice(0, 6).map(n => ({
-      title: n.querySelector('title')?.textContent?.trim() || 'Untitled',
+    return [...xml.querySelectorAll('item, entry')].slice(0, 8).map(n => ({
+      title: cleanTitle(n.querySelector('title')?.textContent?.trim() || 'Untitled'),
       link:  n.querySelector('link')?.textContent?.trim() || n.querySelector('link')?.getAttribute('href') || '#',
       desc:  (n.querySelector('description,summary')?.textContent || '').replace(/<[^>]+>/g,'').trim().slice(0,150) + '…',
       date:  n.querySelector('pubDate,published,updated')?.textContent?.trim() || '',
@@ -247,42 +349,6 @@ async function fetchFeed(f) {
     }));
   } catch { return []; }
 }
-
-const FEEDS = {
-  research:[
-    {url:'https://arxiv.org/rss/cs.AI',label:'arXiv · AI',name:'arXiv'},
-    {url:'https://arxiv.org/rss/cs.LG',label:'arXiv · ML',name:'arXiv'},
-    {url:'https://arxiv.org/rss/cs.CL',label:'arXiv · NLP',name:'arXiv'},
-  ],
-  tools:[
-    {url:'https://techcrunch.com/category/artificial-intelligence/feed/',label:'TechCrunch',name:'TechCrunch'},
-    {url:'https://www.theverge.com/rss/ai-artificial-intelligence/index.xml',label:'The Verge',name:'The Verge'},
-    {url:'https://venturebeat.com/category/ai/feed/',label:'VentureBeat',name:'VentureBeat'},
-  ],
-  policy:[
-    {url:'https://www.technologyreview.com/feed/',label:'MIT Tech Review',name:'MIT Tech Review'},
-    {url:'https://www.brookings.edu/topic/artificial-intelligence/feed/',label:'Brookings',name:'Brookings'},
-  ],
-  business:[
-    {url:'https://www.wired.com/feed/tag/ai/latest/rss',label:'Wired',name:'Wired'},
-    {url:'https://fortune.com/feed/',label:'Fortune',name:'Fortune'},
-  ],
-  pharma:[
-    {url:'https://www.nature.com/natmachintell.rss',label:'Nature MI',name:'Nature'},
-    {url:'https://www.statnews.com/feed/',label:'STAT News',name:'STAT News'},
-    {url:'https://www.fiercebiotech.com/rss/xml',label:'Fierce Biotech',name:'Fierce Biotech'},
-  ],
-  players:[
-    {url:'https://www.anthropic.com/rss.xml',label:'Anthropic',name:'Anthropic',player:'anthropic'},
-    {url:'https://openai.com/news/rss.xml',label:'OpenAI',name:'OpenAI',player:'openai'},
-    {url:'https://blog.google/technology/ai/rss/',label:'Google AI',name:'Google',player:'google'},
-    {url:'https://blogs.microsoft.com/ai/feed/',label:'Microsoft AI',name:'Microsoft',player:'microsoft'},
-    {url:'https://ai.meta.com/blog/rss/',label:'Meta AI',name:'Meta',player:'meta'},
-    {url:'https://blogs.nvidia.com/feed/',label:'NVIDIA',name:'NVIDIA',player:'nvidia'},
-  ],
-};
-
-let all = {};
 
 function fmt(s) {
   if (!s) return '—';
@@ -299,9 +365,31 @@ function card(a) {
   </a>`;
 }
 
-function render(articles, gid, cid, max=6) {
-  document.getElementById(gid).innerHTML = articles.slice(0,max).map(card).join('') ||
-    `<div class="card" style="grid-column:1/-1;color:var(--muted);font-size:13px;padding:32px;">No articles loaded.</div>`;
+// Interleave articles by source so no single source clusters,
+// using the day-seeded shuffle so order is identical for all visitors today
+function interleave(articles) {
+  const bySource = {};
+  articles.forEach(a => {
+    if (!bySource[a.source]) bySource[a.source] = [];
+    bySource[a.source].push(a);
+  });
+  const sources = seededShuffle(Object.keys(bySource));
+  const result = [];
+  let added = true;
+  while (added) {
+    added = false;
+    sources.forEach(s => {
+      if (bySource[s].length) { result.push(bySource[s].shift()); added = true; }
+    });
+  }
+  return result;
+}
+
+function render(articles, gid, cid, max=9) {
+  const mixed = interleave(articles).slice(0, max);
+  document.getElementById(gid).innerHTML = mixed.length
+    ? mixed.map(card).join('')
+    : `<div class="card" style="grid-column:1/-1;color:var(--muted);font-size:13px;padding:32px;">No articles loaded.</div>`;
   if (cid) document.getElementById(cid).textContent = articles.length + ' articles';
 }
 
@@ -326,7 +414,7 @@ async function loadAll() {
   render(all.pharma   || [], 'pharmaGrid',   'pharmaCount');
   render(all.business || [], 'businessGrid', 'businessCount');
 
-  const hero = [...(all.players||[]), ...(all.tools||[]), ...(all.research||[])][0];
+  const hero = interleave([...(all.players||[]), ...(all.tools||[]), ...(all.research||[])])[0];
   if (hero) {
     document.getElementById('ftag').textContent   = hero.label;
     document.getElementById('ftitle').textContent = hero.title;
