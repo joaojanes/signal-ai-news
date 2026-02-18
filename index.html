@@ -311,9 +311,20 @@ function cleanTitle(title) {
   return t;
 }
 
+// ── FRESHNESS FILTER ─────────────────────────────────────────────────────────
+const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
+function isFresh(article) {
+  if (!article.date) return true; // no date = keep it, can't judge
+  const published = new Date(article.date);
+  if (isNaN(published)) return true;
+  return (Date.now() - published.getTime()) <= TWO_WEEKS_MS;
+}
+
 // ── SELECT BEST ARTICLES ─────────────────────────────────────────────────────
 // Score all, sort descending, then ensure source diversity (max 2 per source)
 function selectBest(articles, max = 9) {
+  // Drop anything older than 2 weeks first
+  articles = articles.filter(isFresh);
   // Score every article
   const scored = articles.map(a => ({ ...a, _score: scoreArticle(a) }));
 
@@ -439,7 +450,8 @@ function render(articles, gid, cid) {
   document.getElementById(gid).innerHTML = best.length
     ? best.map(card).join('')
     : `<div class="card" style="grid-column:1/-1;color:var(--muted);font-size:13px;padding:32px;">No articles loaded.</div>`;
-  if (cid) document.getElementById(cid).textContent = articles.length + ' fetched · showing top 9';
+  const fresh = articles.filter(isFresh).length;
+  if (cid) document.getElementById(cid).textContent = fresh + ' fresh articles · showing top 9';
 }
 
 function goto(id) { document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'}); }
